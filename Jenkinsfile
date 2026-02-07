@@ -14,107 +14,85 @@ pipeline {
             }
         }
         
-        stage('Build') {
+        stage('Build Dependencies') {
             steps {
                 echo '=== Installing Dependencies ==='
                 sh 'npm install'
             }
         }
         
-        stage('Test') {
+        stage('Run Tests') {
             steps {
                 echo '=== Running Tests ==='
                 sh 'npm test'
             }
         }
         
-        stage('Docker Build') {
+        stage('Build Docker Image') {
             steps {
                 echo '=== Building Docker Image ==='
                 sh """
                     docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
                     docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest
+                    echo "✓ Image built: ${DOCKER_IMAGE}:${DOCKER_TAG}"
                 """
             }
         }
         
-        stage('Deploy') {
+        stage('Deploy Container') {
             steps {
                 echo '=== Deploying Application ==='
                 sh """
+                    # Remove old container
                     docker stop devops-demo 2>/dev/null || true
                     docker rm devops-demo 2>/dev/null || true
                     
+                    # Deploy new container
                     docker run -d \
                         --name devops-demo \
                         -p 3001:3000 \
                         --restart unless-stopped \
                         ${DOCKER_IMAGE}:latest
                     
-                    echo "Waiting for container to be ready..."
-                    sleep 10
+                    # Wait for startup
+                    echo "Waiting for container to start..."
+                    sleep 5
+                    
+                    # Verify container is running
+                    if docker ps | grep -q devops-demo; then
+                        echo "✓ Container started successfully"
+                    else
+                        echo "✗ Container failed to start"
+                        docker logs devops-demo
+                        exit 1
+                    fi
                 """
-            }
-        }
-        
-        stage('Health Check') {
-            steps {
-                echo '=== Checking Application Health ==='
-                sh '''
-                    echo "Testing from Jenkins container..."
-                    
-                    # Method 1: Test via host network (since Jenkins is in Docker)
-                    for i in {1..15}; do
-                        # Try via docker exec (direct access to container)
-                        if docker exec devops-demo curl -f http://localhost:3000/health 2>/dev/null; then
-                            echo "✓ Health check passed via container exec!"
-                            break
-                        fi
-                        
-                        echo "Attempt $i/15 - Waiting for application..."
-                        sleep 2
-                    done
-                    
-                    # Final verification
-                    echo ""
-                    echo "Container status:"
-                    docker ps | grep devops-demo
-                    
-                    echo ""
-                    echo "Container logs:"
-                    docker logs devops-demo | tail -20
-                    
-                    echo ""
-                    echo "✓ Application is running!"
-                '''
             }
         }
         
         stage('Verify Deployment') {
             steps {
-                echo '=== Final Verification ==='
+                echo '=== Verifying Deployment ==='
                 sh '''
-                    echo "Running final checks..."
-                    
-                    # Check container is running
-                    if docker ps | grep -q devops-demo; then
-                        echo "✓ Container is running"
-                    else
-                        echo "✗ Container is not running"
-                        exit 1
-                    fi
-                    
-                    # Test endpoints from within the container
-                    echo ""
-                    echo "Testing main endpoint:"
-                    docker exec devops-demo curl -s http://localhost:3000
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                    echo "Container Status:"
+                    docker ps | grep devops-demo
                     
                     echo ""
-                    echo "Testing health endpoint:"
-                    docker exec devops-demo curl -s http://localhost:3000/health
+                    echo "Container State:"
+                    docker inspect devops-demo --format='Status: {{.State.Status}}, Running: {{.State.Running}}'
                     
                     echo ""
-                    echo "✓ All checks passed!"
+                    echo "Port Mappings:"
+                    docker port devops-demo
+                    
+                    echo ""
+                    echo "Application Logs:"
+                    docker logs --tail 10 devops-demo
+                    
+                    echo ""
+                    echo "✅ Deployment verification complete!"
+                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
                 '''
             }
         }
@@ -123,20 +101,33 @@ pipeline {
     post {
         success {
             script {
-                def publicIP = sh(script: 'curl -s http://checkip.amazonaws.com 2>/dev/null || echo "IP_NOT_AVAILABLE"', returnStdout: true).trim()
-                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                echo "✅ DEPLOYMENT SUCCESSFUL!"
-                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                echo "🌐 Public URL: http://${publicIP}:3001"
-                echo "💚 Health: http://${publicIP}:3001/health"
-                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                def publicIP = sh(script: 'curl -s http://checkip.amazonaws.com 2>/dev/null || echo "unknown"', returnStdout: true).trim()
+                echo ""
+                echo "╔═══════════════════════════════════════════════════════════════╗"
+                echo "║                 ✅ DEPLOYMENT SUCCESSFUL! 🎉                  ║"
+                echo "╚═══════════════════════════════════════════════════════════════╝"
+                echo ""
+                echo "  🌐 Application URL:  http://${publicIP}:3001"
+                echo "  💚 Health Check:     http://${publicIP}:3001/health"
+                echo ""
+                echo "  📦 Docker Image:     ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                echo "  🐳 Container:        devops-demo"
+                echo "  📊 Build Number:     ${BUILD_NUMBER}"
+                echo ""
+                echo "═══════════════════════════════════════════════════════════════"
             }
         }
         failure {
-            echo '❌ Pipeline failed!'
-            echo 'Container logs:'
-            sh 'docker logs devops-demo 2>&1 || true'
-            sh 'docker ps -a | grep devops-demo || true'
+            echo ""
+            echo "╔═══════════════════════════════════════════════════════════════╗"
+            echo "║                    ❌ DEPLOYMENT FAILED!                      ║"
+            echo "╚═══════════════════════════════════════════════════════════════╝"
+            echo ""
+            echo "📋 Container Logs:"
+            sh 'docker logs devops-demo 2>&1 || echo "No logs available"'
+            echo ""
+            echo "📊 Container Status:"
+            sh 'docker ps -a | grep devops-demo || echo "Container not found"'
         }
         always {
             echo '🧹 Cleaning workspace...'
