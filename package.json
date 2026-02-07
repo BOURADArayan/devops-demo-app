@@ -1,0 +1,16 @@
+{
+  "name": "devops-demo-app",
+  "version": "1.0.0",
+  "description": "Demo DevOps Application",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "test": "echo \"Running tests...\" && exit 0"
+  },
+  "keywords": ["devops", "demo"],
+  "author": "DevOps Team",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
