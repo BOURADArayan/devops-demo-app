@@ -9,7 +9,7 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                echo "=== Checkout Code ==="
+                echo '=== Checkout Code ==='
                 checkout scm
                 sh 'ls -la'
                 sh 'pwd'
@@ -18,7 +18,7 @@ pipeline {
         
         stage('Build') {
             steps {
-                echo "=== Building Application ==="
+                echo '=== Building Application ==='
                 sh '''
                     if [ -f "package.json" ]; then
                         npm install
@@ -33,26 +33,26 @@ pipeline {
         
         stage('Test') {
             steps {
-                echo "=== Running Tests ==="
+                echo '=== Running Tests ==='
                 sh 'npm test'
             }
         }
         
         stage('Build Docker Image') {
             steps {
-                echo "=== Building Docker Image ==="
-                sh '''
+                echo '=== Building Docker Image ==='
+                sh """
                     docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
                     docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest
                     echo "Docker image built successfully"
-                '''
+                """
             }
         }
         
         stage('Deploy to Docker') {
             steps {
-                echo "=== Deploying Application ==="
-                sh '''
+                echo '=== Deploying Application ==='
+                sh """
                     # Stop and remove old container if exists
                     docker stop devops-demo || true
                     docker rm devops-demo || true
@@ -71,13 +71,13 @@ pipeline {
                     docker ps | grep devops-demo
                     
                     echo "Application deployed successfully on port 3001"
-                '''
+                """
             }
         }
         
         stage('Health Check') {
             steps {
-                echo "=== Checking Application Health ==="
+                echo '=== Checking Application Health ==='
                 sh '''
                     sleep 10
                     curl -f http://localhost:3001/health || exit 1
@@ -90,7 +90,10 @@ pipeline {
     post {
         success {
             echo '✅ Pipeline succeeded! 🎉'
-            echo "Application accessible at: http://$(curl -s http://checkip.amazonaws.com):3001"
+            script {
+                def publicIP = sh(script: 'curl -s http://checkip.amazonaws.com', returnStdout: true).trim()
+                echo "Application accessible at: http://${publicIP}:3001"
+            }
         }
         failure {
             echo '❌ Pipeline failed!'
