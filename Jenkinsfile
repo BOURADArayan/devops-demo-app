@@ -54,8 +54,8 @@ pipeline {
                 echo '=== Deploying Application ==='
                 sh """
                     # Stop and remove old container if exists
-                    docker stop devops-demo || true
-                    docker rm devops-demo || true
+                    docker stop devops-demo 2>/dev/null || true
+                    docker rm devops-demo 2>/dev/null || true
                     
                     # Run new container
                     docker run -d \
@@ -64,13 +64,17 @@ pipeline {
                         --restart unless-stopped \
                         ${DOCKER_IMAGE}:latest
                     
-                    # Wait for container to start
+                    echo "Container started, waiting for application..."
                     sleep 5
                     
                     # Check if container is running
-                    docker ps | grep devops-demo
-                    
-                    echo "Application deployed successfully on port 3001"
+                    if docker ps | grep -q devops-demo; then
+                        echo "✓ Container is running"
+                    else
+                        echo "✗ Container failed to start"
+                        docker logs devops-demo
+                        exit 1
+                    fi
                 """
             }
         }
@@ -78,10 +82,45 @@ pipeline {
         stage('Health Check') {
             steps {
                 echo '=== Checking Application Health ==='
+                script {
+                    def maxRetries = 10
+                    def retryCount = 0
+                    def healthy = false
+                    
+                    while (retryCount < maxRetries && !healthy) {
+                        try {
+                            sh 'curl -f --connect-timeout 5 --max-time 10 http://localhost:3001/health'
+                            healthy = true
+                            echo "✓ Health check passed!"
+                        } catch (Exception e) {
+                            retryCount++
+                            echo "Health check attempt ${retryCount}/${maxRetries} failed, retrying in 3 seconds..."
+                            sleep(3)
+                        }
+                    }
+                    
+                    if (!healthy) {
+                        error("Health check failed after ${maxRetries} attempts")
+                    }
+                }
+            }
+        }
+        
+        stage('Verify Deployment') {
+            steps {
+                echo '=== Verifying Deployment ==='
                 sh '''
-                    sleep 10
-                    curl -f http://localhost:3001/health || exit 1
-                    echo "Health check passed!"
+                    echo "Container Status:"
+                    docker ps | grep devops-demo
+                    
+                    echo ""
+                    echo "Container Logs:"
+                    docker logs devops-demo
+                    
+                    echo ""
+                    echo "Testing endpoints:"
+                    curl -s http://localhost:3001 || echo "Main endpoint failed"
+                    curl -s http://localhost:3001/health || echo "Health endpoint failed"
                 '''
             }
         }
@@ -92,12 +131,18 @@ pipeline {
             echo '✅ Pipeline succeeded! 🎉'
             script {
                 def publicIP = sh(script: 'curl -s http://checkip.amazonaws.com', returnStdout: true).trim()
-                echo "Application accessible at: http://${publicIP}:3001"
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo "Application deployed successfully!"
+                echo "Access at: http://${publicIP}:3001"
+                echo "Health check: http://${publicIP}:3001/health"
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             }
         }
         failure {
             echo '❌ Pipeline failed!'
-            sh 'docker logs devops-demo || true'
+            echo 'Showing container logs for debugging:'
+            sh 'docker logs devops-demo 2>&1 || echo "Container not found"'
+            sh 'docker ps -a | grep devops-demo || echo "No container found"'
         }
         always {
             echo '🧹 Cleaning workspace...'
